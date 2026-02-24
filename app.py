@@ -1,6 +1,7 @@
 import streamlit as st
 import re
 import os
+import random  # Added for the shuffle
 import streamlit.components.v1 as components
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
@@ -101,14 +102,7 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. THE PRO ENGINE (S-BOX UPGRADED) ---
-# Non-linear shuffle of numbers 0-30
-SWEET_SBOX = [
-    25, 2, 18, 29, 7, 12, 0, 30, 21, 5, 14, 23, 8, 1, 19, 10, 
-    27, 4, 16, 11, 28, 6, 20, 3, 15, 22, 9, 26, 17, 24, 13
-]
-INV_SBOX = [SWEET_SBOX.index(i) for i in range(31)]
-
+# --- 2. THE ULTIMATE ENGINE (KEY-DEPENDENT S-BOX) ---
 char_to_coord = {
     'Q': (2, 25), 'W': (5, 25), 'E': (8, 25), 'R': (11, 25), 'T': (14, 25), 'Y': (17, 25), 'U': (20, 25), 'I': (23, 25), 'O': (26, 25), 'P': (29, 25),
     'A': (3, 20), 'S': (6, 20), 'D': (9, 20), 'F': (12, 20), 'G': (15, 20), 'H': (18, 20), 'J': (21, 20), 'K': (24, 20), 'L': (27, 20),
@@ -118,6 +112,16 @@ char_to_coord = {
 }
 coord_to_char = {v: k for k, v in char_to_coord.items()}
 EMOJI_MAP = {'1': '🦄', '2': '🍼', '3': '🩷', '4': '🧸', '5': '🎀', '6': '🍓', '7': '🌈', '8': '🌸', '9': '💕', '0': '🫐'}
+
+def get_dynamic_sbox(kw):
+    """Generates a unique S-Box and its inverse based on the secret key."""
+    seed_str = kw + PEPPER
+    seed_hash = hashlib.sha256(seed_str.encode()).digest()
+    rng = random.Random(seed_hash) # Deterministic shuffle
+    sbox = list(range(31))
+    rng.shuffle(sbox)
+    inv_sbox = [sbox.index(i) for i in range(31)]
+    return sbox, inv_sbox
 
 def get_matrix_elements(key_string):
     salt = b"sweet_parity_salt_v2" 
@@ -165,25 +169,25 @@ st.markdown('</div>', unsafe_allow_html=True)
 if kw and (kiss_btn or tell_btn):
     a, b, c, d = get_matrix_elements(kw)
     det_inv = modInverse((a * d - b * c) % 31)
+    # GENERATE CUSTOM S-BOX FOR THIS KEY
+    current_sbox, current_inv_sbox = get_dynamic_sbox(kw)
     
     if det_inv:
         if kiss_btn:
             points = []
             for char in user_input.upper():
                 if char in char_to_coord:
-                    # Apply S-BOX first
+                    # Apply KEY-DEPENDENT S-BOX first
                     x_raw, y_raw = char_to_coord[char]
-                    x, y = SWEET_SBOX[x_raw], SWEET_SBOX[y_raw]
+                    x, y = current_sbox[x_raw], current_sbox[y_raw]
                     nx, ny = (a*x + b*y) % 31, (c*x + d*y) % 31
                     points.append((nx, ny))
             
             if points:
-                # Header logic
                 hx = "".join(EMOJI_MAP.get(digit, digit) for digit in apply_sweet_parity(str(points[0][0])))
                 hy = "".join(EMOJI_MAP.get(digit, digit) for digit in apply_sweet_parity(str(points[0][1])))
                 header = f"{hx[::-1]},{hy[::-1]}"
                 
-                # Relative move logic
                 m_list = []
                 for i in range(len(points)-1):
                     dx_v, dy_v = points[i+1][0]-points[i][0], points[i+1][1]-points[i][1]
@@ -214,8 +218,8 @@ if kw and (kiss_btn or tell_btn):
                 
                 def resolve(cx, cy):
                     ux_s, uy_s = (inv_a * cx + inv_b * cy) % 31, (inv_c * cx + inv_d * cy) % 31
-                    # Reverse S-BOX at the end
-                    return coord_to_char.get((INV_SBOX[ux_s], INV_SBOX[uy_s]), "?")
+                    # Reverse KEY-DEPENDENT S-BOX at the end
+                    return coord_to_char.get((current_inv_sbox[ux_s], current_inv_sbox[uy_s]), "?")
 
                 decoded = [resolve(curr_x, curr_y)]
                 moves = re.findall(r"\(([^)]+)\)", m_part)
@@ -227,3 +231,4 @@ if kw and (kiss_btn or tell_btn):
                 
                 output_placeholder.markdown(f'<div class="whisper-text">Cypher Whispers: {"".join(decoded)}</div>', unsafe_allow_html=True)
             except: st.error("Chemistry Error!")
+
