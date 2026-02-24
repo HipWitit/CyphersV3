@@ -1,7 +1,7 @@
 import streamlit as st
 import re
 import os
-import random  # Added for the shuffle
+import random
 import streamlit.components.v1 as components
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
@@ -12,6 +12,7 @@ st.set_page_config(page_title="Cyfer Pro: Secret Language", layout="centered")
 
 raw_pepper = st.secrets.get("MY_SECRET_PEPPER") or "default_fallback_spice_2026"
 PEPPER = str(raw_pepper)
+MOD = 127  # Prime modulus for 128x128 space
 
 st.markdown(f"""
     <style>
@@ -102,33 +103,30 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. THE ULTIMATE ENGINE (KEY-DEPENDENT S-BOX) ---
-char_to_coord = {
-    'Q': (2, 25), 'W': (5, 25), 'E': (8, 25), 'R': (11, 25), 'T': (14, 25), 'Y': (17, 25), 'U': (20, 25), 'I': (23, 25), 'O': (26, 25), 'P': (29, 25),
-    'A': (3, 20), 'S': (6, 20), 'D': (9, 20), 'F': (12, 20), 'G': (15, 20), 'H': (18, 20), 'J': (21, 20), 'K': (24, 20), 'L': (27, 20),
-    'Z': (4, 15), 'X': (7, 15), 'C': (10, 15), 'V': (13, 15), 'B': (16, 15), 'N': (19, 15), 'M': (22, 15),
-    '1': (2, 10), '2': (5, 10), '3': (8, 10), '4': (11, 10), '5': (14, 10), '6': (17, 10), '7': (20, 10), '8': (23, 10), '9': (26, 10), '0': (29, 10),
-    '!': (5, 5),  ',': (10, 5), '.': (15, 5), ' ': (20, 5), '?': (25, 5)
-}
-coord_to_char = {v: k for k, v in char_to_coord.items()}
+# --- 2. THE 128x128 DYNAMIC ENGINE ---
 EMOJI_MAP = {'1': '🦄', '2': '🍼', '3': '🩷', '4': '🧸', '5': '🎀', '6': '🍓', '7': '🌈', '8': '🌸', '9': '💕', '0': '🫐'}
 
+def get_char_coord(char):
+    # Map ASCII value to a coordinate pair (x, y)
+    val = ord(char) % MOD
+    return (val, (val * 7) % MOD) # Using 7 as a spread factor
+
 def get_dynamic_sbox(kw):
-    """Generates a unique S-Box and its inverse based on the secret key."""
     seed_str = kw + PEPPER
     seed_hash = hashlib.sha256(seed_str.encode()).digest()
-    rng = random.Random(seed_hash) # Deterministic shuffle
-    sbox = list(range(31))
+    rng = random.Random(seed_hash)
+    sbox = list(range(MOD))
     rng.shuffle(sbox)
-    inv_sbox = [sbox.index(i) for i in range(31)]
+    inv_sbox = [sbox.index(i) for i in range(MOD)]
     return sbox, inv_sbox
 
 def get_matrix_elements(key_string):
-    salt = b"sweet_parity_salt_v2" 
+    salt = b"sweet_parity_salt_v3_128" 
     combined_input = key_string + PEPPER 
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=4, salt=salt, iterations=100000, backend=default_backend())
     a, b, c, d = list(kdf.derive(combined_input.encode()))
-    return (a % 10 + 2, b % 7 + 1, c % 5 + 1, d % 13 + 2)
+    # Higher range for the bigger grid
+    return (a % 100 + 2, b % 100 + 1, c % 100 + 1, d % 100 + 2)
 
 def apply_sweet_parity(val_str):
     def replacer(match):
@@ -136,7 +134,7 @@ def apply_sweet_parity(val_str):
         return ('🍭' if int(digit) % 2 == 0 else '🍬') + digit
     return re.sub(r'(-)(\d)', replacer, val_str)
 
-def modInverse(n, m=31):
+def modInverse(n, m=MOD):
     for x in range(1, m):
         if (((n % m) * (x % m)) % m == 1): return x
     return None
@@ -148,7 +146,7 @@ def clear_everything():
 if os.path.exists("CYPHER.png"): st.image("CYPHER.png")
 if os.path.exists("Lock Lips.png"): st.image("Lock Lips.png")
 
-kw = st.text_input("Key", type="password", key="lips", placeholder="SECRET KEY").upper().strip()
+kw = st.text_input("Key", type="password", key="lips", placeholder="SECRET KEY").strip()
 hint_text = st.text_input("Hint", key="hint", placeholder="KEY HINT (Optional)")
 
 if os.path.exists("Kiss Chemistry.png"): st.image("Kiss Chemistry.png")
@@ -168,20 +166,19 @@ st.markdown('</div>', unsafe_allow_html=True)
 # --- 4. PROCESSING ---
 if kw and (kiss_btn or tell_btn):
     a, b, c, d = get_matrix_elements(kw)
-    det_inv = modInverse((a * d - b * c) % 31)
-    # GENERATE CUSTOM S-BOX FOR THIS KEY
+    det = (a * d - b * c) % MOD
+    det_inv = modInverse(det)
     current_sbox, current_inv_sbox = get_dynamic_sbox(kw)
     
     if det_inv:
         if kiss_btn:
             points = []
-            for char in user_input.upper():
-                if char in char_to_coord:
-                    # Apply KEY-DEPENDENT S-BOX first
-                    x_raw, y_raw = char_to_coord[char]
-                    x, y = current_sbox[x_raw], current_sbox[y_raw]
-                    nx, ny = (a*x + b*y) % 31, (c*x + d*y) % 31
-                    points.append((nx, ny))
+            for char in user_input:
+                x_raw, y_raw = get_char_coord(char)
+                # Map through Key-Dependent S-Box
+                x, y = current_sbox[x_raw], current_sbox[y_raw]
+                nx, ny = (a*x + b*y) % MOD, (c*x + d*y) % MOD
+                points.append((nx, ny))
             
             if points:
                 hx = "".join(EMOJI_MAP.get(digit, digit) for digit in apply_sweet_parity(str(points[0][0])))
@@ -213,13 +210,13 @@ if kw and (kiss_btn or tell_btn):
                 hx_e, hy_e = h_part.strip().split(",")
                 curr_x, curr_y = e_to_m(hx_e[::-1]), e_to_m(hy_e[::-1])
                 
-                inv_a, inv_b = (d * det_inv) % 31, (-b * det_inv) % 31
-                inv_c, inv_d = (-c * det_inv) % 31, (a * det_inv) % 31
+                inv_a, inv_b = (d * det_inv) % MOD, (-b * det_inv) % MOD
+                inv_c, inv_d = (-c * det_inv) % MOD, (a * det_inv) % MOD
                 
                 def resolve(cx, cy):
-                    ux_s, uy_s = (inv_a * cx + inv_b * cy) % 31, (inv_c * cx + inv_d * cy) % 31
-                    # Reverse KEY-DEPENDENT S-BOX at the end
-                    return coord_to_char.get((current_inv_sbox[ux_s], current_inv_sbox[uy_s]), "?")
+                    ux_s, uy_s = (inv_a * cx + inv_b * cy) % MOD, (inv_c * cx + inv_d * cy) % MOD
+                    # Undo S-Box and convert back to Char
+                    return chr(current_inv_sbox[ux_s])
 
                 decoded = [resolve(curr_x, curr_y)]
                 moves = re.findall(r"\(([^)]+)\)", m_part)
@@ -231,4 +228,5 @@ if kw and (kiss_btn or tell_btn):
                 
                 output_placeholder.markdown(f'<div class="whisper-text">Cypher Whispers: {"".join(decoded)}</div>', unsafe_allow_html=True)
             except: st.error("Chemistry Error!")
-
+    else:
+        st.error("Matrix Error - This key is too weak! Try a different one.")
