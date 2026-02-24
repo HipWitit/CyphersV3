@@ -34,10 +34,7 @@ st.markdown(f"""
         font-weight: bold !important;
     }}
 
-    /* Custom Meter Styling */
-    .stProgress > div > div > div > div {{
-        background-color: #B4A7D6 !important;
-    }}
+    .stProgress > div > div > div > div {{ background-color: #B4A7D6 !important; }}
 
     [data-testid="column"], [data-testid="stVerticalBlock"] > div {{ width: 100% !important; flex: 1 1 100% !important; }}
     .stButton, .stButton > button {{ width: 100% !important; display: block !important; }}
@@ -55,7 +52,6 @@ st.markdown(f"""
         color: #FFD4E5 !important;
         border-radius: 15px !important;
         min-height: 100px !important; 
-        height: auto !important;     
         border: none !important;
         text-transform: uppercase;
         box-shadow: 0px 4px 12px rgba(0,0,0,0.15);
@@ -111,7 +107,7 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. THE ENGINE ---
+# --- 2. THE CRYPTO LOGIC ---
 EMOJI_MAP = {'1': '🦄', '2': '🍼', '3': '🩷', '4': '🧸', '5': '🎀', '6': '🍓', '7': '🌈', '8': '🌸', '9': '💕', '0': '🫐'}
 
 def get_char_coord(char):
@@ -119,27 +115,22 @@ def get_char_coord(char):
     return (val, (val * 7) % MOD)
 
 def get_fernet_sbox(kw):
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=b"fernet_sbox_salt_v1",
-        iterations=100000,
-        backend=default_backend()
-    )
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=b"fernet_sbox_v1", iterations=100000, backend=default_backend())
     key_bytes = kdf.derive((kw + PEPPER).encode())
     fernet_key = base64.urlsafe_b64encode(key_bytes)
     f = Fernet(fernet_key)
-    seed_token = f.encrypt(b"sbox_shuffler_2026")
+    # Using a deterministic seed derived from the key itself
+    seed_token = hashlib.sha256(f.encrypt(b"SBOX_SEED")).digest()
     rng = random.Random(seed_token)
     sbox = list(range(MOD))
     rng.shuffle(sbox)
     inv_sbox = [sbox.index(i) for i in range(MOD)]
     return sbox, inv_sbox
 
-def get_matrix_elements(key_string):
-    salt = b"sweet_parity_salt_v3_128" 
+def get_matrix_elements(kw):
+    salt = b"matrix_salt_v3" 
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=4, salt=salt, iterations=100000, backend=default_backend())
-    a, b, c, d = list(kdf.derive((key_string + PEPPER).encode()))
+    a, b, c, d = list(kdf.derive((kw + PEPPER).encode()))
     return (a % 100 + 2, b % 100 + 1, c % 100 + 1, d % 100 + 2)
 
 def apply_sweet_parity(val_str):
@@ -162,9 +153,13 @@ if os.path.exists("Lock Lips.png"): st.image("Lock Lips.png")
 
 kw = st.text_input("Key", type="password", key="lips", placeholder="SECRET KEY").strip()
 
-# --- CHEMISTRY METER CALCULATION ---
+# Chemistry Meter Logic
 if kw:
-    strength = min(len(kw) / 12.0, 1.0) # Simple scale: 12 chars = 100%
+    has_digit = any(char.isdigit() for char in kw)
+    has_special = any(not char.isalnum() for char in kw)
+    base_score = len(kw) / 12.0
+    bonus = (0.1 if has_digit else 0) + (0.1 if has_special else 0)
+    strength = min(base_score + bonus, 1.0)
     st.write(f"🧪 **CHEMISTRY LEVEL:** {int(strength*100)}%")
     st.progress(strength)
 else:
@@ -180,6 +175,7 @@ output_placeholder = st.empty()
 kiss_btn, tell_btn = st.button("KISS"), st.button("TELL")
 st.button("DESTROY CHEMISTRY", on_click=clear_everything)
 
+# Footer
 st.markdown('<div class="custom-footer">', unsafe_allow_html=True)
 if os.path.exists("LPB.png"):
     c1, c2, c3 = st.columns([1, 2, 1])
@@ -187,19 +183,21 @@ if os.path.exists("LPB.png"):
 st.markdown('<div class="footer-text">CREATED BY</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 4. PROCESSING ---
+# --- 4. THE CORE FUNCTIONS ---
 if kw and (kiss_btn or tell_btn):
     a, b, c, d = get_matrix_elements(kw)
     det = (a * d - b * c) % MOD
     det_inv = modInverse(det)
-    current_sbox, current_inv_sbox = get_fernet_sbox(kw)
+    sbox, inv_sbox = get_fernet_sbox(kw)
     
     if det_inv:
         if kiss_btn:
             points = []
             for char in user_input:
                 x_raw, y_raw = get_char_coord(char)
-                x, y = current_sbox[x_raw], current_sbox[y_raw]
+                # Fernet S-box Substitution
+                x, y = sbox[x_raw], sbox[y_raw]
+                # Matrix Transformation
                 nx, ny = (a*x + b*y) % MOD, (c*x + d*y) % MOD
                 points.append((nx, ny))
             
@@ -238,7 +236,7 @@ if kw and (kiss_btn or tell_btn):
                 
                 def resolve(cx, cy):
                     ux_s, uy_s = (inv_a * cx + inv_b * cy) % MOD, (inv_c * cx + inv_d * cy) % MOD
-                    return chr(current_inv_sbox[ux_s])
+                    return chr(inv_sbox[ux_s])
 
                 decoded = [resolve(curr_x, curr_y)]
                 moves = re.findall(r"\(([^)]+)\)", m_part)
@@ -249,6 +247,5 @@ if kw and (kiss_btn or tell_btn):
                     decoded.append(resolve(curr_x, curr_y))
                 
                 output_placeholder.markdown(f'<div class="whisper-text">Cypher Whispers: {"".join(decoded)}</div>', unsafe_allow_html=True)
-            except: st.error("Chemistry Error! Check Key.")
-    else:
-        st.error("Matrix Error - Try another Key.")
+            except: st.error("Chemistry Error! The key or message is mismatched.")
+    else: st.error("Key Matrix is unstable. Try a different key!")
