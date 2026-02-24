@@ -115,13 +115,19 @@ def get_char_coord(char):
     return (val, (val * 7) % MOD)
 
 def get_fernet_sbox(kw):
+    """Generates a robust key-dependent S-box using Fernet and explicit Int seeding."""
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=b"fernet_sbox_v1", iterations=100000, backend=default_backend())
     key_bytes = kdf.derive((kw + PEPPER).encode())
     fernet_key = base64.urlsafe_b64encode(key_bytes)
     f = Fernet(fernet_key)
-    # Using a deterministic seed derived from the key itself
-    seed_token = hashlib.sha256(f.encrypt(b"SBOX_SEED")).digest()
-    rng = random.Random(seed_token)
+    
+    # Deterministic hash generation
+    seed_bytes = hashlib.sha256(f.encrypt(b"SBOX_SEED")).digest()
+    
+    # SAFE CONVERSION: Explicitly convert bytes to a large integer
+    seed_int = int.from_bytes(seed_bytes, byteorder='big')
+    
+    rng = random.Random(seed_int)
     sbox = list(range(MOD))
     rng.shuffle(sbox)
     inv_sbox = [sbox.index(i) for i in range(MOD)]
@@ -195,9 +201,7 @@ if kw and (kiss_btn or tell_btn):
             points = []
             for char in user_input:
                 x_raw, y_raw = get_char_coord(char)
-                # Fernet S-box Substitution
                 x, y = sbox[x_raw], sbox[y_raw]
-                # Matrix Transformation
                 nx, ny = (a*x + b*y) % MOD, (c*x + d*y) % MOD
                 points.append((nx, ny))
             
