@@ -34,6 +34,11 @@ st.markdown(f"""
         font-weight: bold !important;
     }}
 
+    /* Custom Meter Styling */
+    .stProgress > div > div > div > div {{
+        background-color: #B4A7D6 !important;
+    }}
+
     [data-testid="column"], [data-testid="stVerticalBlock"] > div {{ width: 100% !important; flex: 1 1 100% !important; }}
     .stButton, .stButton > button {{ width: 100% !important; display: block !important; }}
 
@@ -106,7 +111,7 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. FERNET-SBOX ENGINE ---
+# --- 2. THE ENGINE ---
 EMOJI_MAP = {'1': '🦄', '2': '🍼', '3': '🩷', '4': '🧸', '5': '🎀', '6': '🍓', '7': '🌈', '8': '🌸', '9': '💕', '0': '🫐'}
 
 def get_char_coord(char):
@@ -114,8 +119,6 @@ def get_char_coord(char):
     return (val, (val * 7) % MOD)
 
 def get_fernet_sbox(kw):
-    """Uses Fernet to generate a high-entropy, key-dependent S-Box."""
-    # 1. Derive a 32-byte key for Fernet
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -125,12 +128,8 @@ def get_fernet_sbox(kw):
     )
     key_bytes = kdf.derive((kw + PEPPER).encode())
     fernet_key = base64.urlsafe_b64encode(key_bytes)
-    
-    # 2. Use Fernet to encrypt a static seed to get unpredictable randomness
     f = Fernet(fernet_key)
     seed_token = f.encrypt(b"sbox_shuffler_2026")
-    
-    # 3. Seed the shuffle with the encrypted token
     rng = random.Random(seed_token)
     sbox = list(range(MOD))
     rng.shuffle(sbox)
@@ -162,6 +161,16 @@ if os.path.exists("CYPHER.png"): st.image("CYPHER.png")
 if os.path.exists("Lock Lips.png"): st.image("Lock Lips.png")
 
 kw = st.text_input("Key", type="password", key="lips", placeholder="SECRET KEY").strip()
+
+# --- CHEMISTRY METER CALCULATION ---
+if kw:
+    strength = min(len(kw) / 12.0, 1.0) # Simple scale: 12 chars = 100%
+    st.write(f"🧪 **CHEMISTRY LEVEL:** {int(strength*100)}%")
+    st.progress(strength)
+else:
+    st.write("🧪 **CHEMISTRY LEVEL:** 0%")
+    st.progress(0.0)
+
 hint_text = st.text_input("Hint", key="hint", placeholder="KEY HINT (Optional)")
 
 if os.path.exists("Kiss Chemistry.png"): st.image("Kiss Chemistry.png")
@@ -183,8 +192,6 @@ if kw and (kiss_btn or tell_btn):
     a, b, c, d = get_matrix_elements(kw)
     det = (a * d - b * c) % MOD
     det_inv = modInverse(det)
-    
-    # Use the new Fernet-powered S-Box
     current_sbox, current_inv_sbox = get_fernet_sbox(kw)
     
     if det_inv:
