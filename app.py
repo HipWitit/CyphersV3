@@ -2,8 +2,10 @@ import streamlit as st
 import re
 import os
 import random
-import hashlib  # <--- FIXED: The missing piece that caused the error!
+import hashlib
+import base64
 import streamlit.components.v1 as components
+from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
@@ -13,7 +15,7 @@ st.set_page_config(page_title="Cyfer Pro: Secret Language", layout="centered")
 
 raw_pepper = st.secrets.get("MY_SECRET_PEPPER") or "default_fallback_spice_2026"
 PEPPER = str(raw_pepper)
-MOD = 127  # Prime modulus for 128x128 ASCII space
+MOD = 127 
 
 st.markdown(f"""
     <style>
@@ -32,7 +34,6 @@ st.markdown(f"""
         font-weight: bold !important;
     }}
 
-    /* Layout fixes for mobile button stacking */
     [data-testid="column"], [data-testid="stVerticalBlock"] > div {{ width: 100% !important; flex: 1 1 100% !important; }}
     .stButton, .stButton > button {{ width: 100% !important; display: block !important; }}
 
@@ -56,7 +57,6 @@ st.markdown(f"""
         margin-top: 15px !important;
     }}
 
-    /* Footer Button Styling */
     div[data-testid="stVerticalBlock"] > div:last-child .stButton > button p {{ font-size: 24px !important; }}
     div[data-testid="stVerticalBlock"] > div:last-child .stButton > button {{
         min-height: 70px !important;
@@ -106,41 +106,50 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. THE 128x128 DYNAMIC ENGINE ---
+# --- 2. FERNET-SBOX ENGINE ---
 EMOJI_MAP = {'1': '🦄', '2': '🍼', '3': '🩷', '4': '🧸', '5': '🎀', '6': '🍓', '7': '🌈', '8': '🌸', '9': '💕', '0': '🫐'}
 
 def get_char_coord(char):
-    """Maps any ASCII character to a coordinate pair (x, y)."""
     val = ord(char) % MOD
     return (val, (val * 7) % MOD)
 
-def get_dynamic_sbox(kw):
-    """Generates a key-dependent shuffle for the entire 127-character set."""
-    seed_str = kw + PEPPER
-    seed_hash = hashlib.sha256(seed_str.encode()).digest()
-    rng = random.Random(seed_hash)
+def get_fernet_sbox(kw):
+    """Uses Fernet to generate a high-entropy, key-dependent S-Box."""
+    # 1. Derive a 32-byte key for Fernet
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"fernet_sbox_salt_v1",
+        iterations=100000,
+        backend=default_backend()
+    )
+    key_bytes = kdf.derive((kw + PEPPER).encode())
+    fernet_key = base64.urlsafe_b64encode(key_bytes)
+    
+    # 2. Use Fernet to encrypt a static seed to get unpredictable randomness
+    f = Fernet(fernet_key)
+    seed_token = f.encrypt(b"sbox_shuffler_2026")
+    
+    # 3. Seed the shuffle with the encrypted token
+    rng = random.Random(seed_token)
     sbox = list(range(MOD))
     rng.shuffle(sbox)
     inv_sbox = [sbox.index(i) for i in range(MOD)]
     return sbox, inv_sbox
 
 def get_matrix_elements(key_string):
-    """Derives Hill Cipher matrix values from the key."""
     salt = b"sweet_parity_salt_v3_128" 
-    combined_input = key_string + PEPPER 
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=4, salt=salt, iterations=100000, backend=default_backend())
-    a, b, c, d = list(kdf.derive(combined_input.encode()))
+    a, b, c, d = list(kdf.derive((key_string + PEPPER).encode()))
     return (a % 100 + 2, b % 100 + 1, c % 100 + 1, d % 100 + 2)
 
 def apply_sweet_parity(val_str):
-    """Adds candy/lollipop indicators for negative numbers in the moves."""
     def replacer(match):
         digit = match.group(2)
         return ('🍭' if int(digit) % 2 == 0 else '🍬') + digit
     return re.sub(r'(-)(\d)', replacer, val_str)
 
 def modInverse(n, m=MOD):
-    """Calculates the modular multiplicative inverse for decryption."""
     for x in range(1, m):
         if (((n % m) * (x % m)) % m == 1): return x
     return None
@@ -174,7 +183,9 @@ if kw and (kiss_btn or tell_btn):
     a, b, c, d = get_matrix_elements(kw)
     det = (a * d - b * c) % MOD
     det_inv = modInverse(det)
-    current_sbox, current_inv_sbox = get_dynamic_sbox(kw)
+    
+    # Use the new Fernet-powered S-Box
+    current_sbox, current_inv_sbox = get_fernet_sbox(kw)
     
     if det_inv:
         if kiss_btn:
@@ -186,12 +197,10 @@ if kw and (kiss_btn or tell_btn):
                 points.append((nx, ny))
             
             if points:
-                # Encode starting position
                 hx = "".join(EMOJI_MAP.get(digit, digit) for digit in apply_sweet_parity(str(points[0][0])))
                 hy = "".join(EMOJI_MAP.get(digit, digit) for digit in apply_sweet_parity(str(points[0][1])))
                 header = f"{hx[::-1]},{hy[::-1]}"
                 
-                # Encode moves between letters
                 m_list = []
                 for i in range(len(points)-1):
                     dx_v, dy_v = points[i+1][0]-points[i][0], points[i+1][1]-points[i][1]
@@ -233,6 +242,6 @@ if kw and (kiss_btn or tell_btn):
                     decoded.append(resolve(curr_x, curr_y))
                 
                 output_placeholder.markdown(f'<div class="whisper-text">Cypher Whispers: {"".join(decoded)}</div>', unsafe_allow_html=True)
-            except: st.error("Chemistry Error! Check your Key or Cipher string.")
+            except: st.error("Chemistry Error! Check Key.")
     else:
-        st.error("Matrix Error - This key results in a non-invertible matrix. Try a different key!")
+        st.error("Matrix Error - Try another Key.")
